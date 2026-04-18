@@ -1,0 +1,45 @@
+[tool.poetry]
+name = "bgk-ai-mcp-server"
+version = "0.1.0"
+description = "Centralny MCP server BGK — Jira, Confluence, Grafana, Bitbucket, Ollama"
+authors = ["Zespół AI BGK"]
+readme = "README.md"
+packages = [{ include = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+mcp = ">=1.20"
+httpx = ">=0.27"
+python-dotenv = ">=1.0"
+uvicorn = { version = ">=0.30", extras = ["standard"] }
+pydantic = ">=2.0"
+pydantic-settings = ">=2.0"
+starlette = ">=0.40"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+pytest-asyncio = ">=0.23"
+ruff = ">=0.4"
+
+[tool.poetry.scripts]
+mcp-server = "src.server:app"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[[tool.poetry.source]]
+name = "internal"
+url = "https://repo.bank.com.pl/artifactory/api/pypi/pypi-remote/simple"
+priority = "primary"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

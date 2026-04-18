@@ -1,0 +1,48 @@
+### Python ###
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+### Poetry ###
+# Poetry zazwyczaj tworzy wirtualne środowiska w zewnętrznym folderze, 
+# ale jeśli skonfigurowałeś je wewnątrz projektu (virtualenvs.in-project = true):
+.venv/
+# Plik lock jest kluczowy i POWINIEN być w repo, ale cache już nie:
+.pytest_cache/
+.pypy_cache/
+
+### Środowisko i konfiguracja ###
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+### VS Code ###
+.vscode/
+*.code-workspace
+
+### Systemowe ###
+.DS_Store
+Thumbs.db
