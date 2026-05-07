@@ -90,13 +90,13 @@ def build_app():
     mcp_app = mcp.streamable_http_app()
 
     # Dodaj health endpoint do MCP app lub opakuj w Starlette
-    app = Starlette(
-        routes=[Route("/health", health)],
-    )
-
-    # Zamontuj MCP pod /mcp
     from starlette.routing import Mount
-    app.mount("/mcp", mcp_app)
+    app = Starlette(
+        routes=[
+            Route("/health", health),
+            Mount("/", app=mcp_app),
+        ]
+    )
 
     # Middleware (kolejność: najpierw logging, potem auth)
     app.add_middleware(APIKeyMiddleware, api_key=settings.MCP_API_KEY)
