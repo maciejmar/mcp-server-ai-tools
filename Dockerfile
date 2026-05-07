@@ -1,31 +1,17 @@
-FROM repo.bank.com.pl/python:3.11-slim AS builder
+# FROM python:3.12-slim  # Docker Hub — niedostępne w sieci BGK
+FROM repo.bank.com.pl/zrai-docker-remote-dev/python:3.12-slim
 
-ENV POETRY_VERSION=1.8.3 \
-    POETRY_HOME=/opt/poetry \
-    POETRY_VIRTUALENVS_IN_PROJECT=true \
-    POETRY_NO_INTERACTION=1
+WORKDIR /app
 
-# Instalacja Poetry z wewnętrznego PyPI mirror
-RUN pip install --no-cache-dir \
-    --index-url https://repo.bank.com.pl/artifactory/api/pypi/pypi-remote/simple \
+COPY requirements.txt ./
+RUN --mount=type=secret,id=pip_conf,target=/etc/pip.conf \
+    pip install \
     --trusted-host repo.bank.com.pl \
-    "poetry==$POETRY_VERSION"
+    --trusted-host pypi.org \
+    --trusted-host files.pythonhosted.org \
+    --no-cache-dir -r requirements.txt
 
-WORKDIR /app
-COPY pyproject.toml poetry.lock* ./
-
-RUN poetry install --only main --no-root --no-cache
-
-# --- Runtime image ---
-FROM repo.bank.com.pl/python:3.11-slim
-
-WORKDIR /app
-
-COPY --from=builder /app/.venv /app/.venv
 COPY src/ ./src/
-COPY .env.example .env
-
-ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 

@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      secrets:
+        - pip_conf
     container_name: bgk-mcp-server
     restart: unless-stopped
     ports:
@@ -19,9 +21,14 @@ services:
       timeout: 5s
       retries: 3
     volumes:
-      # Opcjonalnie: montuj wewnętrzny CA bundle jeśli potrzebny
       - /etc/pki/tls/certs/ca-bundle.crt:/etc/pki/tls/certs/ca-bundle.crt:ro
 
 networks:
   ai-network:
     external: true
+
+secrets:
+  pip_conf:
+    file: /etc/pip.conf
+  ca_cert:
+    file: /etc/pki/ca-trust/source/anchors/bank-jfrog-ca.crt
