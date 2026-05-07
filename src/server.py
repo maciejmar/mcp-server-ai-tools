@@ -68,10 +68,6 @@ ollama_client = OllamaClient(
 # Serwer MCP
 mcp = FastMCP(
     name="bgk-ai-mcp",
-    description=(
-        "Centralny MCP server BGK — narzędzia do Jira, Confluence, Grafana, "
-        "Bitbucket i infrastruktury AI (GPU, kontenery, Ollama)."
-    ),
     stateless_http=True,
 )
 
