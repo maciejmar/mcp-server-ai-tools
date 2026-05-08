@@ -1,8 +1,6 @@
 import os
-import sys
 import logging
 
-# Ładuj .env przed importem settings
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -13,8 +11,7 @@ configure_json_logging(settings.MCP_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 from mcp.server.fastmcp import FastMCP
-from starlette.applications import Starlette
-from starlette.routing import Route
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from src.clients.jira_client import JiraClient
@@ -32,10 +29,8 @@ from src.tools.infra_tools import register_infra_tools
 from src.middleware.auth import APIKeyMiddleware
 from src.middleware.logging import AuditLoggingMiddleware
 
-# Wykryj ścieżkę do CA bundle — użyj tylko jeśli plik istnieje
 _ca_bundle: str | None = settings.TLS_CA_BUNDLE if os.path.isfile(settings.TLS_CA_BUNDLE) else None
 
-# Inicjalizacja klientów HTTP
 jira_client = JiraClient(
     base_url=settings.JIRA_URL,
     token=settings.JIRA_PAT,
@@ -65,13 +60,11 @@ ollama_client = OllamaClient(
     timeout=settings.OLLAMA_TIMEOUT,
 )
 
-# Serwer MCP
 mcp = FastMCP(
     name="bgk-ai-mcp",
     stateless_http=True,
 )
 
-# Rejestracja narzędzi
 register_jira_tools(mcp, jira_client)
 register_confluence_tools(mcp, confluence_client)
 register_grafana_tools(mcp, grafana_client)
@@ -81,27 +74,19 @@ register_infra_tools(mcp, ollama_client)
 logger.info("MCP tools registered", extra={"tool_count": len(mcp._tool_manager._tools)})
 
 
-async def health(request):
-    return JSONResponse({"status": "ok", "service": "bgk-ai-mcp"})
+class HealthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        if request.url.path == "/health":
+            return JSONResponse({"status": "ok", "service": "bgk-ai-mcp"})
+        return await call_next(request)
 
 
 def build_app():
-    """Buduje Starlette ASGI app z MCP serverem i middleware."""
-    mcp_app = mcp.streamable_http_app()
-
-    # Dodaj health endpoint do MCP app lub opakuj w Starlette
-    from starlette.routing import Mount
-    app = Starlette(
-        routes=[
-            Route("/health", health),
-            Mount("/", app=mcp_app),
-        ]
-    )
-
-    # Middleware (kolejność: najpierw logging, potem auth)
+    app = mcp.streamable_http_app()
+    # Kolejność add_middleware: ostatni dodany = najbardziej zewnętrzny (uruchamia się pierwszy)
     app.add_middleware(APIKeyMiddleware, api_key=settings.MCP_API_KEY)
     app.add_middleware(AuditLoggingMiddleware)
-
+    app.add_middleware(HealthMiddleware)
     return app
 
 
@@ -118,5 +103,5 @@ if __name__ == "__main__":
         "src.server:app",
         host="0.0.0.0",
         port=settings.MCP_SERVER_PORT,
-        log_config=None,  # używamy własnego loggera
+        log_config=None,
     )
