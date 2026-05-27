@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -40,18 +41,25 @@ def register_log_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def log_read_filtered(path: str | None = None, max_lines: int | None = None) -> dict:
-        """Reads high-signal log lines from an allowlisted file.
+        """Reads high-signal log lines from an allowlisted file or Docker container.
 
+        Accepts either an allowlisted file path or a docker://container-name URI.
         The tool removes noisy lines and redacts secrets before returning data.
-        It never reads paths outside MCP_ALLOWED_LOG_PATHS.
+        It never reads paths outside MCP_ALLOWED_LOG_PATHS (file mode).
         """
         logger.info("log_read_filtered called", extra={"tool": "log_read_filtered", "path": path})
+
+        if path and path.startswith("docker://"):
+            container = path[len("docker://"):]
+            return await _read_docker_logs(container, max_lines)
+
         resolved = _resolve_allowed_path(path)
         if resolved is None:
             return {
                 "error": "No allowed log file was found",
                 "requested_path": path,
                 "available_paths": [str(item) for item in _allowed_log_paths()],
+                "hint": "You can also use docker://container-name to read container logs",
                 "lines": [],
             }
 
@@ -89,6 +97,32 @@ def register_log_tools(mcp: FastMCP) -> None:
             "filtered_line_count": snapshot.get("filtered_line_count"),
             "groups": {key: value[:20] for key, value in groups.items() if value},
         }
+
+
+async def _read_docker_logs(container: str, max_lines: int | None) -> dict:
+    limit = _bounded_limit(max_lines)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "logs", "--tail", str(limit), container,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+        raw_lines = stdout.decode("utf-8", errors="replace").splitlines()
+    except asyncio.TimeoutError:
+        return {"error": f"Timeout reading docker logs for container '{container}'", "lines": []}
+    except FileNotFoundError:
+        return {"error": "docker CLI not found — install docker.io in the MCP container", "lines": []}
+    except Exception as exc:
+        return {"error": f"Failed to read docker logs for '{container}': {exc}", "lines": []}
+
+    filtered = list(_filter_and_redact(raw_lines))
+    return {
+        "path": f"docker://{container}",
+        "raw_line_count": len(raw_lines),
+        "filtered_line_count": len(filtered),
+        "lines": filtered,
+    }
 
 
 def _allowed_log_paths() -> list[Path]:

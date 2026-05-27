@@ -23,8 +23,7 @@ services:
       retries: 3
     volumes:
       - /etc/pki/tls/certs/ca-bundle.crt:/etc/pki/tls/certs/ca-bundle.crt:ro
-      - /var/log/messages:/host/var/log/messages:ro
-      # - /var/log/app.log:/host/var/log/app.log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
 secrets:
   pip_conf:

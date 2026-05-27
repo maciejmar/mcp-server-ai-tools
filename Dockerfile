@@ -3,6 +3,10 @@ FROM repo.bank.com.pl/zrai-docker-remote-dev/python:3.12-slim
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt ./
 RUN --mount=type=secret,id=pip_conf,target=/etc/pip.conf \
     pip install \
