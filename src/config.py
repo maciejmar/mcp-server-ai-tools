@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     MCP_SERVER_PORT: int = 8000
     MCP_LOG_LEVEL: str = "INFO"
     MCP_API_KEY: str = ""
+    MCP_ALLOWED_LOG_PATHS: str = ""
+    MCP_MAX_LOG_LINES: int = 500
+    MCP_MAX_LOG_LINES_HARD_LIMIT: int = 2000
 
     # TLS
     TLS_CA_BUNDLE: str = "/etc/pki/tls/certs/ca-bundle.crt"

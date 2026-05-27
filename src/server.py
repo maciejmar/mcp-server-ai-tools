@@ -25,6 +25,7 @@ from src.tools.confluence_tools import register_confluence_tools
 from src.tools.grafana_tools import register_grafana_tools
 from src.tools.bitbucket_tools import register_bitbucket_tools
 from src.tools.infra_tools import register_infra_tools
+from src.tools.log_tools import register_log_tools
 
 from src.middleware.auth import APIKeyMiddleware
 from src.middleware.logging import AuditLoggingMiddleware
@@ -70,6 +71,7 @@ register_confluence_tools(mcp, confluence_client)
 register_grafana_tools(mcp, grafana_client)
 register_bitbucket_tools(mcp, bitbucket_client)
 register_infra_tools(mcp, ollama_client)
+register_log_tools(mcp)
 
 logger.info("MCP tools registered", extra={"tool_count": len(mcp._tool_manager._tools)})
 
