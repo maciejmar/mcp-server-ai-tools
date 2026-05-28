@@ -11,8 +11,13 @@ configure_json_logging(settings.MCP_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecurityMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+
+# Disable DNS rebinding protection — server runs in Docker, all connections come from
+# internal container network IPs (not browsers), so rebinding attacks are not applicable.
+TransportSecurityMiddleware._validate_host = lambda self, host: True
 
 from src.clients.jira_client import JiraClient
 from src.clients.confluence_client import ConfluenceClient
