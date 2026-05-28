@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import httpx
 from mcp.server.fastmcp import FastMCP
 from src.clients.ollama_client import OllamaClient
@@ -161,3 +162,114 @@ def register_infra_tools(mcp: FastMCP, ollama_client: OllamaClient) -> None:
             return {"error": f"Ollama zwróciła błąd {e.response.status_code}", "detail": str(e)}
         except httpx.RequestError as e:
             return {"error": "Błąd połączenia z Ollama", "detail": str(e)}
+
+    @mcp.tool()
+    async def server_system_info() -> dict:
+        """Pobiera informacje systemowe hosta przez Docker socket: CPU, RAM, wersja Docker, OS."""
+        logger.info("server_system_info called", extra={"tool": "server_system_info"})
+        try:
+            transport = httpx.AsyncHTTPTransport(uds="/var/run/docker.sock")
+            async with httpx.AsyncClient(transport=transport, base_url="http://docker", timeout=15.0) as client:
+                response = await client.get("/info")
+            if response.status_code != 200:
+                return {"error": f"Docker API returned {response.status_code}"}
+            data = response.json()
+            return {
+                "cpus": data.get("NCPU"),
+                "memory_total_gb": round(data.get("MemTotal", 0) / (1024 ** 3), 2),
+                "docker_version": data.get("ServerVersion"),
+                "kernel_version": data.get("KernelVersion"),
+                "os": data.get("OperatingSystem"),
+                "storage_driver": data.get("Driver"),
+                "containers": {
+                    "running": data.get("ContainersRunning"),
+                    "paused": data.get("ContainersPaused"),
+                    "stopped": data.get("ContainersStopped"),
+                },
+                "images_count": data.get("Images"),
+            }
+        except Exception as exc:
+            return {"error": f"System info error: {exc}"}
+
+    @mcp.tool()
+    async def container_inspect(container_name: str) -> dict:
+        """Pobiera konfiguracje kontenera: limity zasobow, restart policy, zmienne srodowiskowe.
+
+        Args:
+            container_name: Nazwa kontenera Docker, np. '''bgk-mcp-server'''.
+        """
+        logger.info("container_inspect called", extra={"tool": "container_inspect", "container": container_name})
+        try:
+            transport = httpx.AsyncHTTPTransport(uds="/var/run/docker.sock")
+            async with httpx.AsyncClient(transport=transport, base_url="http://docker", timeout=15.0) as client:
+                response = await client.get(f"/containers/{container_name}/json")
+            if response.status_code == 404:
+                return {"error": f"Container not found: {container_name}"}
+            if response.status_code != 200:
+                return {"error": f"Docker API returned {response.status_code}"}
+            data = response.json()
+            host_cfg = data.get("HostConfig", {})
+            state = data.get("State", {})
+            config = data.get("Config", {})
+            sensitive_re = re.compile(r"(?i)(password|passwd|pwd|secret|token|api[_\-]?key|pat)=")
+            env_redacted = []
+            for e in config.get("Env", []):
+                if sensitive_re.search(e):
+                    env_redacted.append(e.split("=", 1)[0] + "=[REDACTED]")
+                else:
+                    env_redacted.append(e)
+            mem_limit = host_cfg.get("Memory", 0)
+            cpu_quota = host_cfg.get("CpuQuota", 0)
+            cpu_period = host_cfg.get("CpuPeriod", 0) or 100000
+            return {
+                "name": container_name,
+                "image": config.get("Image"),
+                "status": state.get("Status"),
+                "health": state.get("Health", {}).get("Status") if state.get("Health") else None,
+                "restart_count": state.get("RestartCount", 0),
+                "restart_policy": host_cfg.get("RestartPolicy", {}).get("Name"),
+                "memory_limit_mb": round(mem_limit / (1024 ** 2), 1) if mem_limit else "unlimited",
+                "cpu_limit": round(cpu_quota / cpu_period, 2) if cpu_quota > 0 else "unlimited",
+                "environment": env_redacted,
+                "mounts": [
+                    {"source": m.get("Source"), "destination": m.get("Destination"), "mode": m.get("Mode")}
+                    for m in data.get("Mounts", [])
+                ],
+            }
+        except Exception as exc:
+            return {"error": f"Container inspect error: {exc}"}
+
+    @mcp.tool()
+    async def docker_system_df() -> dict:
+        """Pokazuje zuzycie dysku przez Docker: obrazy, woluminy, zatrzymane kontenery."""
+        logger.info("docker_system_df called", extra={"tool": "docker_system_df"})
+        try:
+            transport = httpx.AsyncHTTPTransport(uds="/var/run/docker.sock")
+            async with httpx.AsyncClient(transport=transport, base_url="http://docker", timeout=30.0) as client:
+                response = await client.get("/system/df")
+            if response.status_code != 200:
+                return {"error": f"Docker API returned {response.status_code}"}
+            data = response.json()
+
+            def to_gb(b):
+                return round(b / (1024 ** 3), 2)
+
+            images = sorted(
+                [{"tag": (i.get("RepoTags") or ["<none>"])[0], "size_gb": to_gb(i.get("Size", 0))}
+                 for i in data.get("Images", [])],
+                key=lambda x: -x["size_gb"],
+            )[:20]
+            volumes = sorted(
+                [{"name": v.get("Name"), "size_gb": to_gb((v.get("UsageData") or {}).get("Size", 0) or 0)}
+                 for v in data.get("Volumes", [])],
+                key=lambda x: -x["size_gb"],
+            )[:10]
+            stopped_count = sum(1 for c in data.get("Containers", []) if c.get("State") != "running")
+            return {
+                "total_images_gb": to_gb(sum(i.get("Size", 0) for i in data.get("Images", []))),
+                "images": images,
+                "volumes": volumes,
+                "stopped_containers_reclaimable": stopped_count,
+            }
+        except Exception as exc:
+            return {"error": f"Docker system df error: {exc}"}
