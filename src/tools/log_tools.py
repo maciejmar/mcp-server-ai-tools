@@ -1,8 +1,10 @@
-import asyncio
 import logging
 import re
+import struct
 from pathlib import Path
 from typing import Iterable
+
+import httpx
 
 from mcp.server.fastmcp import FastMCP
 
@@ -102,17 +104,17 @@ def register_log_tools(mcp: FastMCP) -> None:
 async def _read_docker_logs(container: str, max_lines: int | None) -> dict:
     limit = _bounded_limit(max_lines)
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "docker", "logs", "--tail", str(limit), container,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
-        raw_lines = stdout.decode("utf-8", errors="replace").splitlines()
-    except asyncio.TimeoutError:
-        return {"error": f"Timeout reading docker logs for container '{container}'", "lines": []}
-    except FileNotFoundError:
-        return {"error": "docker CLI not found — install docker.io in the MCP container", "lines": []}
+        transport = httpx.AsyncHTTPTransport(uds="/var/run/docker.sock")
+        async with httpx.AsyncClient(transport=transport, base_url="http://docker", timeout=15.0) as client:
+            response = await client.get(
+                f"/containers/{container}/logs",
+                params={"stdout": 1, "stderr": 1, "tail": limit},
+            )
+        if response.status_code == 404:
+            return {"error": f"Container '{container}' not found", "lines": []}
+        if response.status_code != 200:
+            return {"error": f"Docker API returned {response.status_code}", "lines": []}
+        raw_lines = _parse_docker_log_stream(response.content).splitlines()
     except Exception as exc:
         return {"error": f"Failed to read docker logs for '{container}': {exc}", "lines": []}
 
@@ -123,6 +125,22 @@ async def _read_docker_logs(container: str, max_lines: int | None) -> dict:
         "filtered_line_count": len(filtered),
         "lines": filtered,
     }
+
+
+def _parse_docker_log_stream(data: bytes) -> str:
+    """Parse Docker multiplexed log stream (8-byte frame header per chunk)."""
+    result = []
+    offset = 0
+    while offset + 8 <= len(data):
+        frame_size = struct.unpack_from(">I", data, offset + 4)[0]
+        offset += 8
+        if offset + frame_size > len(data):
+            break
+        result.append(data[offset: offset + frame_size].decode("utf-8", errors="replace"))
+        offset += frame_size
+    if not result:
+        return data.decode("utf-8", errors="replace")
+    return "".join(result)
 
 
 def _allowed_log_paths() -> list[Path]:

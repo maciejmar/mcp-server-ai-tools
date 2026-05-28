@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -76,42 +77,34 @@ def register_infra_tools(mcp: FastMCP, ollama_client: OllamaClient) -> None:
             "tool": "server_container_status", "name_filter": name_filter
         })
         try:
-            cmd = [
-                "docker", "ps", "-a",
-                "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}\t{{.CreatedAt}}\t{{.RunningFor}}",
-            ]
+            params: dict = {"all": "1"}
             if name_filter:
-                cmd += ["--filter", f"name={name_filter}"]
+                params["filters"] = json.dumps({"name": [name_filter]})
 
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
-            if proc.returncode != 0:
-                return {"error": "docker ps zakończył się błędem", "detail": stderr.decode()}
+            transport = httpx.AsyncHTTPTransport(uds="/var/run/docker.sock")
+            async with httpx.AsyncClient(transport=transport, base_url="http://docker", timeout=15.0) as client:
+                response = await client.get("/containers/json", params=params)
+            if response.status_code != 200:
+                return {"error": f"Docker API returned {response.status_code}"}
 
             containers = []
-            for line in stdout.decode().strip().split("\n"):
-                if not line.strip():
-                    continue
-                parts = line.split("\t")
-                if len(parts) < 6:
-                    continue
+            for c in response.json():
+                names = [n.lstrip("/") for n in c.get("Names", [])]
+                ports = ", ".join(
+                    f"{p['PublicPort']}:{p['PrivatePort']}/{p['Type']}"
+                    for p in c.get("Ports", []) if p.get("PublicPort")
+                )
                 containers.append({
-                    "name": parts[0],
-                    "status": parts[1],
-                    "image": parts[2],
-                    "ports": parts[3],
-                    "created": parts[4],
-                    "running_for": parts[5],
+                    "name": names[0] if names else c.get("Id", "")[:12],
+                    "status": c.get("Status", ""),
+                    "image": c.get("Image", ""),
+                    "ports": ports,
+                    "created": c.get("Created", ""),
+                    "running_for": c.get("Status", ""),
                 })
             return {"total": len(containers), "containers": containers}
-        except FileNotFoundError:
-            return {"error": "Docker nie jest dostępny na tym systemie"}
-        except asyncio.TimeoutError:
-            return {"error": "Timeout podczas pobierania statusu kontenerów"}
+        except Exception as exc:
+            return {"error": f"Błąd połączenia z Docker socket: {exc}"}
 
     @mcp.tool()
     async def ollama_list_models() -> dict:
