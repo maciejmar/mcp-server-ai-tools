@@ -83,13 +83,28 @@ class HealthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class HostNormalizationMiddleware:
+    """Rewrite Host header to localhost so MCP transport security accepts internal IP connections."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            scope["headers"] = [
+                (b"host", b"localhost") if key.lower() == b"host" else (key, value)
+                for key, value in scope.get("headers", [])
+            ]
+        await self.app(scope, receive, send)
+
+
 def build_app():
     app = mcp.streamable_http_app()
     # Kolejność add_middleware: ostatni dodany = najbardziej zewnętrzny (uruchamia się pierwszy)
     app.add_middleware(APIKeyMiddleware, api_key=settings.MCP_API_KEY)
     app.add_middleware(AuditLoggingMiddleware)
     app.add_middleware(HealthMiddleware)
-    return app
+    # Wrap as outermost layer — rewrites Host before TransportSecurityMiddleware sees it
+    return HostNormalizationMiddleware(app)
 
 
 app = build_app()
